@@ -1,3 +1,9 @@
+# Cross-compilation: include a toolchain file to override CC, AR, AS, etc.
+# Usage: make TOOLCHAIN=../shared/toolchains/x86_64-linux.mk
+ifdef TOOLCHAIN
+  include $(TOOLCHAIN)
+endif
+
 ARCH ?= $(shell uname -m)
 
 # Normalize host arch names
@@ -23,33 +29,35 @@ ARFLAGS := rcs
 # Platform detection
 UNAME_S := $(shell uname -s)
 
-# Architecture-specific assembler setup
-ifeq ($(ARCH),arm)
-  AS      := $(CC)
-  ASFLAGS := -c
-  ASM_EXT := S
-  ifneq ($(UNAME_S),Darwin)
-    ASFLAGS += -march=armv8-a+crypto
-  endif
-else ifeq ($(ARCH),x86_64)
-  AS      := nasm
-  ASFLAGS := -f elf64
-  ASM_EXT := asm
-else ifeq ($(ARCH),x86_32)
-  AS      := nasm
-  ASFLAGS := -f elf32
-  ASM_EXT := asm
-  CFLAGS  += -m32
-else
-  $(error Unsupported ARCH=$(ARCH). Use arm, x86_64, or x86_32)
-endif
-
-# macOS overrides
-ifeq ($(UNAME_S),Darwin)
-  ifeq ($(ARCH),x86_64)
-    ASFLAGS := -f macho64 -DMACOS
+# Architecture-specific assembler setup (only when no toolchain override)
+ifndef TOOLCHAIN
+  ifeq ($(ARCH),arm)
+    AS      := $(CC)
+    ASFLAGS := -c
+    ASM_EXT := S
+    ifneq ($(UNAME_S),Darwin)
+      ASFLAGS += -march=armv8-a+crypto
+    endif
+  else ifeq ($(ARCH),x86_64)
+    AS      := nasm
+    ASFLAGS := -f elf64
+    ASM_EXT := asm
   else ifeq ($(ARCH),x86_32)
-    ASFLAGS := -f macho32 -DMACOS
+    AS      := nasm
+    ASFLAGS := -f elf32
+    ASM_EXT := asm
+    CFLAGS  += -m32
+  else
+    $(error Unsupported ARCH=$(ARCH). Use arm, x86_64, or x86_32)
+  endif
+
+  # macOS overrides (only for native builds, not cross-compilation)
+  ifeq ($(UNAME_S),Darwin)
+    ifeq ($(ARCH),x86_64)
+      ASFLAGS := -f macho64 -DMACOS
+    else ifeq ($(ARCH),x86_32)
+      ASFLAGS := -f macho32 -DMACOS
+    endif
   endif
 endif
 

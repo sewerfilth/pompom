@@ -373,7 +373,7 @@ pompom_pipe_t *pompom_pipe_accept(pompom_host_t *host,
     uint8_t f = buf[5];
     uint64_t total = pp_get64(buf + 6);
     uint16_t nlen = pp_get16(buf + 14);
-    if (16 + nlen > (size_t)n) return NULL;
+    if ((size_t)(16 + nlen) > (size_t)n) return NULL;
 
     pompom_pipe_t *p = calloc(1, sizeof(*p));
     if (!p) return NULL;

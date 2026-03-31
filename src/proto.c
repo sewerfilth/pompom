@@ -186,7 +186,7 @@ int pompom_pkt_decode(pompom_session_t *sess,
     uint32_t seq      = get32(pkt + 4);
     uint16_t len      = get16(pkt + 8);
 
-    if (pktlen < POMPOM_HDR_SIZE + len)
+    if (pktlen < (size_t)(POMPOM_HDR_SIZE + len))
         return -1;
 
     /* Handshake packets are unencrypted */
