@@ -20,11 +20,17 @@ AR      ?= ar
 CFLAGS  := -Wall -Wextra -Werror -Iinclude
 ARFLAGS := rcs
 
+# Platform detection
+UNAME_S := $(shell uname -s)
+
 # Architecture-specific assembler setup
 ifeq ($(ARCH),arm)
   AS      := $(CC)
   ASFLAGS := -c
-  ASM_EXT := s
+  ASM_EXT := S
+  ifneq ($(UNAME_S),Darwin)
+    ASFLAGS += -march=armv8-a+crypto
+  endif
 else ifeq ($(ARCH),x86_64)
   AS      := nasm
   ASFLAGS := -f elf64
@@ -38,13 +44,12 @@ else
   $(error Unsupported ARCH=$(ARCH). Use arm, x86_64, or x86_32)
 endif
 
-# macOS object format override for nasm
-UNAME_S := $(shell uname -s)
+# macOS overrides
 ifeq ($(UNAME_S),Darwin)
   ifeq ($(ARCH),x86_64)
-    ASFLAGS := -f macho64
+    ASFLAGS := -f macho64 -DMACOS
   else ifeq ($(ARCH),x86_32)
-    ASFLAGS := -f macho32
+    ASFLAGS := -f macho32 -DMACOS
   endif
 endif
 
@@ -60,9 +65,39 @@ OBJS     := $(ASM_OBJ) $(C_OBJ)
 
 TARGET := $(BUILDDIR)/libpompom.a
 
-.PHONY: all clean
+# Test / bench
+TEST_BIN := $(BUILDDIR)/pompom_bench
+
+# Examples
+HOST_BIN   := $(BUILDDIR)/pompom_host
+CLIENT_BIN := $(BUILDDIR)/pompom_client
+
+# Stress / pentest
+STRESS_BIN := $(BUILDDIR)/pompom_stress
+
+.PHONY: all clean test stress examples
 
 all: $(TARGET)
+
+examples: $(HOST_BIN) $(CLIENT_BIN)
+
+stress: $(STRESS_BIN)
+	./$(STRESS_BIN)
+
+$(STRESS_BIN): test/stress.c $(TARGET) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -O2 -o $@ $< $(TARGET)
+
+$(HOST_BIN): examples/host.c $(TARGET) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -O2 -o $@ $< $(TARGET)
+
+$(CLIENT_BIN): examples/client.c $(TARGET) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -O2 -o $@ $< $(TARGET)
+
+test: $(TEST_BIN)
+	./$(TEST_BIN)
+
+$(TEST_BIN): test/bench.c $(TARGET) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -O2 -o $@ $< $(TARGET)
 
 $(TARGET): $(OBJS) | $(BUILDDIR)
 	$(AR) $(ARFLAGS) $@ $^
