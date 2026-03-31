@@ -27,6 +27,7 @@
 #include "pompom/accel.h"
 #include "pompom/proto.h"
 #include "pompom/net.h"
+#include "pompom/stream.h"
 
 static double now_sec(void) {
 #ifdef __APPLE__
@@ -644,6 +645,146 @@ static int test_net_peer_exhaustion(void) {
  * Main
  * ================================================================ */
 
+/* ================================================================
+ * STREAM — Event stream + reliable pipe tests (forked, real UDP)
+ * ================================================================ */
+
+static int test_event_stream_roundtrip(void) {
+    uint8_t key[8] = {0x70,0x6F,0x6D,0x70,0x6F,0x6D,0x21,0x21};
+    uint16_t port = 9920;
+
+    pompom_host_t *host = pompom_host_create(key, port);
+    if (!host) return 0;
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: client receives events */
+        usleep(50000);
+        pompom_client_t *cli = pompom_client_connect(key, "127.0.0.1", port);
+        if (!cli) _exit(1);
+
+        uint16_t evt_type;
+        uint8_t buf[256];
+        int n = pompom_event_recv(cli, &evt_type, buf, sizeof(buf), 2000);
+        pompom_client_destroy(cli);
+
+        if (n <= 0) _exit(2);
+        buf[n] = 0;
+        _exit(evt_type == 0x0100 && strcmp((char *)buf, "hello events") == 0 ? 0 : 3);
+    }
+
+    /* Parent: host emits event after client connects */
+    uint32_t peer;
+    uint8_t dummy[64];
+    /* Wait for client HELLO (consumed internally by host_recv) */
+    /* Client connect sends HELLO, host_recv processes it. We need the client
+     * to be connected before we emit. Just do a brief host_recv to process HELLO. */
+    pompom_host_recv(host, &peer, dummy, sizeof(dummy), 1000);
+    usleep(100000);
+
+    pompom_event_emit(host, 0x0100, (const uint8_t *)"hello events", 12);
+
+    int status;
+    waitpid(pid, &status, 0);
+    pompom_host_destroy(host);
+
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static int test_pipe_file_transfer(void) {
+    uint8_t key[8] = {0x70,0x6F,0x6D,0x70,0x6F,0x6D,0x21,0x21};
+    uint16_t port = 9921;
+
+    pompom_host_t *host = pompom_host_create(key, port);
+    if (!host) return 0;
+
+    /* Prepare test data: 32KB of patterned data */
+    size_t datasz = 32 * 1024;
+    uint8_t *original = malloc(datasz);
+    for (size_t i = 0; i < datasz; i++)
+        original[i] = (uint8_t)(i * 7 + 13);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: client sends file via pipe */
+        usleep(50000);
+        pompom_client_t *cli = pompom_client_connect(key, "127.0.0.1", port);
+        if (!cli) _exit(1);
+
+        pompom_pipe_t *pipe = pompom_pipe_open(cli, "test.bin", datasz, POMPOM_PIPE_FLAG_FILE);
+        if (!pipe) { pompom_client_destroy(cli); _exit(2); }
+
+        int rc = pompom_pipe_write(pipe, original, datasz);
+        if (rc < 0) { pompom_pipe_close(pipe); pompom_client_destroy(cli); _exit(3); }
+
+        pompom_pipe_finish(pipe);
+        pompom_pipe_close(pipe);
+        pompom_client_destroy(cli);
+        _exit(0);
+    }
+
+    /* Parent: host receives file via pipe */
+    uint32_t peer;
+    char name[256];
+    uint64_t total;
+    uint8_t flags;
+    pompom_pipe_t *pipe = pompom_pipe_accept(host, &peer, name, sizeof(name),
+                                              &total, &flags, 3000);
+    int ok = 0;
+    if (pipe && total == datasz) {
+        uint8_t *received = malloc(datasz);
+        size_t got = 0;
+        while (got < datasz) {
+            int n = pompom_pipe_read(pipe, received + got, datasz - got, 2000);
+            if (n <= 0) break;
+            got += (size_t)n;
+        }
+        ok = (got == datasz && memcmp(original, received, datasz) == 0);
+        printf("    pipe: name=\"%s\" total=%llu got=%zu match=%d\n",
+               name, (unsigned long long)total, got, ok);
+        free(received);
+        pompom_pipe_close(pipe);
+    } else {
+        printf("    pipe: accept failed (pipe=%p total=%llu)\n", (void *)pipe, (unsigned long long)total);
+    }
+
+    int status;
+    waitpid(pid, &status, 0);
+    pompom_host_destroy(host);
+    free(original);
+
+    int child_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return ok && child_ok;
+}
+
+static int test_proxy_rule_management(void) {
+    uint8_t key[8] = {0};
+    pompom_host_t *host = pompom_host_create(key, 9922);
+    if (!host) return 0;
+
+    pompom_proxy_rule_t rule = { .target_port = 8080 };
+    strncpy(rule.name, "web", sizeof(rule.name));
+    strncpy(rule.target_host, "127.0.0.1", sizeof(rule.target_host));
+
+    int rc = pompom_proxy_add_rule(host, &rule);
+    if (rc != 0) { pompom_host_destroy(host); return 0; }
+
+    /* Adding another rule */
+    pompom_proxy_rule_t rule2 = { .target_port = 22 };
+    strncpy(rule2.name, "ssh", sizeof(rule2.name));
+    strncpy(rule2.target_host, "127.0.0.1", sizeof(rule2.target_host));
+    pompom_proxy_add_rule(host, &rule2);
+
+    /* Remove first rule */
+    rc = pompom_proxy_remove_rule(host, "web");
+
+    /* Try removing non-existent rule */
+    int bad = pompom_proxy_remove_rule(host, "nonexistent");
+
+    pompom_host_destroy(host);
+    return rc == 0 && bad != 0;
+}
+
 int main(void) {
     pompom_accel_detect();
 
@@ -676,6 +817,11 @@ int main(void) {
         /* Network */
         { "NET",    "4 concurrent clients",            test_net_multi_client },
         { "NET",    "65 clients (peer exhaustion)",    test_net_peer_exhaustion },
+
+        /* Stream + pipe */
+        { "STREAM", "event stream roundtrip",          test_event_stream_roundtrip },
+        { "STREAM", "pipe 32KB file transfer",         test_pipe_file_transfer },
+        { "STREAM", "proxy rule add/remove",           test_proxy_rule_management },
     };
 
     int n = (int)(sizeof(tests) / sizeof(tests[0]));
