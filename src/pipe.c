@@ -1,3 +1,4 @@
+#ifndef NO_POSIX_SOCKETS
 #include "pompom/stream.h"
 #include "pompom/proto.h"
 
@@ -531,3 +532,5 @@ int pompom_proxy_remove_rule(pompom_host_t *host, const char *name) {
 pompom_pipe_t *pompom_proxy_connect(pompom_client_t *client, const char *service_name) {
     return pompom_pipe_open(client, service_name, 0, POMPOM_PIPE_FLAG_PROXY);
 }
+
+#endif /* NO_POSIX_SOCKETS */

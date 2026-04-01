@@ -23,7 +23,7 @@ endif
 # Toolchain defaults
 CC      ?= cc
 AR      ?= ar
-CFLAGS  := -Wall -Wextra -Werror -Iinclude
+CFLAGS  += -Wall -Wextra -Werror -Iinclude
 ARFLAGS := rcs
 
 # Platform detection

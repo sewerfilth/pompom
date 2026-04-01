@@ -1,3 +1,4 @@
+#ifndef NO_POSIX_SOCKETS
 #include "pompom/net.h"
 #include "pompom/proto.h"
 
@@ -129,3 +130,5 @@ int pompom_client_recv(pompom_client_t *c,
             return (int)outlen;
     }
 }
+
+#endif /* NO_POSIX_SOCKETS */

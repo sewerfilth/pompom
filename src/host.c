@@ -1,3 +1,4 @@
+#ifndef NO_POSIX_SOCKETS
 #include "pompom/net.h"
 #include "pompom/proto.h"
 
@@ -227,3 +228,5 @@ void pompom_host_kick(pompom_host_t *h, uint32_t peer_id) {
 int pompom_host_peer_count(const pompom_host_t *h) {
     return h->peer_count;
 }
+
+#endif /* NO_POSIX_SOCKETS */

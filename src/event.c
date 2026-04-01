@@ -1,3 +1,4 @@
+#ifndef NO_POSIX_SOCKETS
 #include "pompom/stream.h"
 #include "pompom/proto.h"
 
@@ -127,3 +128,5 @@ int pompom_event_recv(pompom_client_t *client,
         memcpy(buf, raw + 2, data_len);
     return (int)data_len;
 }
+
+#endif /* NO_POSIX_SOCKETS */
