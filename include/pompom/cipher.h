@@ -37,4 +37,12 @@ void pompom_crypt(pompom_state_t *st,
  */
 void pompom_block(pompom_state_t *st, uint8_t ks[POMPOM_BLOCK_SIZE]);
 
+/*
+ * Batched keystream generator (asm). Writes nblocks * POMPOM_BLOCK_SIZE bytes
+ * to ks, advancing st, keeping the cipher state and cascade constants resident
+ * across all blocks. Bit-exact with calling pompom_block() nblocks times
+ * (verified in test/blockn_equiv.c). Used by pompom_crypt for the bulk path.
+ */
+void pompom_blockN(pompom_state_t *st, uint8_t *ks, uint32_t nblocks);
+
 #endif

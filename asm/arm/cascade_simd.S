@@ -68,10 +68,14 @@ tbl_masks:
     .global pompom_cascade_x_aes
 _pompom_cascade_x_aes:
 pompom_cascade_x_aes:
+    /* Leaf function. Uses only caller-saved vector regs (v0-v7, v16-v20),
+     * so no d8-d15 save/restore is required (AAPCS64-clean by construction). */
+
     /* Load 8 lane bytes */
     ld1     {v0.8b}, [x0]
 
-    /* Load X rotation vectors + salts */
+    /* Load X rotation vectors + salts in one structured load
+     * (x_params: lshifts@0, rshifts@8, salts@16 — 24 contiguous bytes). */
 #ifdef __APPLE__
     adrp    x1, x_params@PAGE
     add     x1, x1, x_params@PAGEOFF
@@ -79,9 +83,7 @@ pompom_cascade_x_aes:
     adrp    x1, x_params
     add     x1, x1, :lo12:x_params
 #endif
-    ld1     {v1.8b}, [x1], #8          /* lshifts */
-    ld1     {v2.8b}, [x1], #8          /* rshifts (negative = right) */
-    ld1     {v3.8b}, [x1]              /* salts */
+    ld1     {v1.8b, v2.8b, v3.8b}, [x1]   /* v1=lshifts v2=rshifts v3=salts */
 
     /* Vector ROL8 per lane: (state << n) | (state >> (8-n)) */
     ushl    v4.8b, v0.8b, v1.8b        /* left part */
@@ -99,23 +101,23 @@ pompom_cascade_x_aes:
     adrp    x2, tbl_masks
     add     x2, x2, :lo12:tbl_masks
 #endif
-    ld1     {v10.16b, v11.16b, v12.16b, v13.16b}, [x2]
+    ld1     {v17.16b, v18.16b, v19.16b, v20.16b}, [x2]
 
     /* Zero upper half of v0 for 16B TBL */
     mov     v0.d[1], xzr
 
     /* Scatter even/odd lanes into separate registers */
-    tbl     v6.16b, {v0.16b}, v10.16b  /* even → pos {0,1,2,3} */
-    tbl     v7.16b, {v0.16b}, v11.16b  /* odd  → pos {0,1,2,3} */
+    tbl     v6.16b, {v0.16b}, v17.16b  /* even → pos {0,1,2,3} */
+    tbl     v7.16b, {v0.16b}, v18.16b  /* odd  → pos {0,1,2,3} */
 
     /* Hardware S-box */
-    movi    v8.16b, #0
-    aese    v6.16b, v8.16b             /* even: SubBytes + ShiftRows */
-    aesd    v7.16b, v8.16b             /* odd:  InvSubBytes + InvShiftRows */
+    movi    v16.16b, #0
+    aese    v6.16b, v16.16b            /* even: SubBytes + ShiftRows */
+    aesd    v7.16b, v16.16b            /* odd:  InvSubBytes + InvShiftRows */
 
     /* Gather results from shuffled positions */
-    tbl     v6.16b, {v6.16b}, v12.16b  /* AESE output: {0,13,10,7} */
-    tbl     v7.16b, {v7.16b}, v13.16b  /* AESD output: {0,5,10,15} */
+    tbl     v6.16b, {v6.16b}, v19.16b  /* AESE output: {0,13,10,7} */
+    tbl     v7.16b, {v7.16b}, v20.16b  /* AESD output: {0,5,10,15} */
 
     /* Interleave even/odd back to lane order */
     zip1    v0.8b, v6.8b, v7.8b
@@ -136,9 +138,11 @@ pompom_cascade_x_aes:
     .global pompom_cascade_y_aes
 _pompom_cascade_y_aes:
 pompom_cascade_y_aes:
+    /* Leaf function — caller-saved vector regs only, no save/restore. */
     ld1     {v0.8b}, [x0]
 
-    /* Load Y rotation vectors + salts */
+    /* Load Y rotation vectors + salts (one structured load:
+     * y_params: rshifts@0, lshifts@8, salts@16). */
 #ifdef __APPLE__
     adrp    x1, y_params@PAGE
     add     x1, x1, y_params@PAGEOFF
@@ -146,9 +150,7 @@ pompom_cascade_y_aes:
     adrp    x1, y_params
     add     x1, x1, :lo12:y_params
 #endif
-    ld1     {v1.8b}, [x1], #8          /* rshifts (negative) */
-    ld1     {v2.8b}, [x1], #8          /* lshifts (positive) */
-    ld1     {v3.8b}, [x1]              /* salts */
+    ld1     {v1.8b, v2.8b, v3.8b}, [x1]   /* v1=rshifts v2=lshifts v3=salts */
 
     /* Vector ROR8 per lane: (state >> n) | (state << (8-n)) */
     ushl    v4.8b, v0.8b, v1.8b        /* right part */
@@ -164,21 +166,21 @@ pompom_cascade_y_aes:
     adrp    x2, tbl_masks
     add     x2, x2, :lo12:tbl_masks
 #endif
-    ld1     {v10.16b, v11.16b, v12.16b, v13.16b}, [x2]
+    ld1     {v17.16b, v18.16b, v19.16b, v20.16b}, [x2]
 
     mov     v0.d[1], xzr
 
-    tbl     v6.16b, {v0.16b}, v10.16b  /* even */
-    tbl     v7.16b, {v0.16b}, v11.16b  /* odd */
+    tbl     v6.16b, {v0.16b}, v17.16b  /* even */
+    tbl     v7.16b, {v0.16b}, v18.16b  /* odd */
 
     /* Y: S-boxes SWAPPED vs X */
-    movi    v8.16b, #0
-    aesd    v6.16b, v8.16b             /* even: InvSubBytes */
-    aese    v7.16b, v8.16b             /* odd:  SubBytes */
+    movi    v16.16b, #0
+    aesd    v6.16b, v16.16b            /* even: InvSubBytes */
+    aese    v7.16b, v16.16b            /* odd:  SubBytes */
 
     /* Gather (note swapped gather masks vs X) */
-    tbl     v6.16b, {v6.16b}, v13.16b  /* AESD: {0,5,10,15} */
-    tbl     v7.16b, {v7.16b}, v12.16b  /* AESE: {0,13,10,7} */
+    tbl     v6.16b, {v6.16b}, v20.16b  /* AESD: {0,5,10,15} */
+    tbl     v7.16b, {v7.16b}, v19.16b  /* AESE: {0,13,10,7} */
 
     zip1    v0.8b, v6.8b, v7.8b
 

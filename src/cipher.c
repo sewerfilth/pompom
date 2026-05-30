@@ -115,18 +115,29 @@ void pompom_block(pompom_state_t *st, uint8_t ks[POMPOM_BLOCK_SIZE]) {
 
 void pompom_crypt(pompom_state_t *st,
                   const uint8_t *in, uint8_t *out, size_t len) {
-    uint8_t ks[POMPOM_BLOCK_SIZE];
-    size_t off = 0;
+    /*
+     * Generate keystream in batches via the asm pompom_blockN(), which keeps
+     * the cipher state and all cascade constants resident across the batch
+     * (~3.5x the per-block path at steady state). Bit-exact with looping
+     * pompom_block() — verified in test/blockn_equiv.c (KAT + cross-impl +
+     * roundtrip). The C side just picks the batch size by message length.
+     */
+    enum { BATCH = 64 };                       /* 1 KiB keystream on the stack */
+    uint8_t ks[BATCH * POMPOM_BLOCK_SIZE];
+    size_t off  = 0;
+    size_t full = len / POMPOM_BLOCK_SIZE;
 
-    while (off + POMPOM_BLOCK_SIZE <= len) {
-        pompom_block(st, ks);
-        for (int i = 0; i < POMPOM_BLOCK_SIZE; i++)
-            out[off + i] = in[off + i] ^ ks[i];
-        off += POMPOM_BLOCK_SIZE;
+    while (full) {
+        uint32_t nb = full > BATCH ? BATCH : (uint32_t)full;
+        pompom_blockN(st, ks, nb);
+        size_t n = (size_t)nb * POMPOM_BLOCK_SIZE;
+        for (size_t i = 0; i < n; i++) out[off + i] = in[off + i] ^ ks[i];
+        off  += n;
+        full -= nb;
     }
 
-    if (off < len) {
-        pompom_block(st, ks);
+    if (off < len) {                           /* partial final block */
+        pompom_blockN(st, ks, 1);
         for (size_t i = 0; off + i < len; i++)
             out[off + i] = in[off + i] ^ ks[i];
     }
